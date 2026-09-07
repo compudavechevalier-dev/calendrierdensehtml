@@ -70,6 +70,16 @@
 <body>
 <div class="wrap">
 
+  <div id="fileWarning" class="setup-box" style="display:none;border-color:#dc2626;background:#fef2f2;">
+    <h2>Ce fichier est ouvert directement, ça ne marchera pas</h2>
+    <p>L'adresse commence par <code>file://</code>. Google refuse la connexion depuis cette adresse: il faut servir le fichier via un petit serveur local, une fois par session de travail.</p>
+    <ol>
+      <li>Ouvre un terminal (ou l'invite de commandes) dans le dossier où est enregistré ce fichier.</li>
+      <li>Tape: <code>python3 -m http.server 8000</code> (sous Windows, si ça ne marche pas, essaie <code>python -m http.server 8000</code>).</li>
+      <li>Laisse cette fenêtre de terminal ouverte, puis va dans le navigateur à l'adresse: <code>http://localhost:8000/</code> et clique sur le nom de ce fichier.</li>
+    </ol>
+  </div>
+
   <div id="setupBox" class="setup-box" style="display:none;">
     <h2>Configuration requise (une seule fois)</h2>
     <p>Ce fichier appelle directement l'API Google Calendar depuis ton navigateur: il te faut ton propre identifiant client Google (gratuit).</p>
@@ -88,6 +98,7 @@
   <div id="connectBox" class="connect-box" style="display:none;">
     <button onclick="signIn()">Se connecter avec Google</button>
     <p>Accès en lecture seule à ton agenda, rien n'est ni modifié ni envoyé ailleurs.</p>
+    <p><button onclick="resetClientId()" style="background:none;border:none;color:#9ca3af;text-decoration:underline;cursor:pointer;font-size:11.5px;padding:0;">Changer l'ID client Google</button></p>
   </div>
 
   <div id="appBox" style="display:none;">
@@ -200,6 +211,10 @@ function saveClientId() {
   document.getElementById("setupBox").style.display = "none";
   initGoogle();
 }
+function resetClientId() {
+  localStorage.removeItem("cd_client_id");
+  location.reload();
+}
 
 function initGoogle() {
   if (!CLIENT_ID) { document.getElementById("setupBox").style.display = "block"; return; }
@@ -226,6 +241,12 @@ function signOut() {
 }
 
 window.addEventListener("load", () => {
+  if (window.location.protocol === "file:") {
+    document.getElementById("setupBox").style.display = "none";
+    document.getElementById("connectBox").style.display = "none";
+    document.getElementById("fileWarning").style.display = "block";
+    return;
+  }
   const iv = setInterval(() => {
     if (window.google && google.accounts) { clearInterval(iv); initGoogle(); }
   }, 100);
