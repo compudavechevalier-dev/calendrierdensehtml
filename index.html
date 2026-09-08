@@ -9,7 +9,7 @@
   :root { --line:#d1d5db; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; color:#111827; background:#fff; }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px 22px 80px; }
+  .wrap { max-width: 1800px; margin: 0 auto; padding: 20px 26px 80px; }
 
   .setup-box { border:1px solid #f59e0b; background:#fffbeb; border-radius:6px; padding:16px 18px; margin-bottom:18px; font-size:13.5px; line-height:1.6; }
   .setup-box h2 { margin:0 0 8px; font-size:15px; }
@@ -39,21 +39,22 @@
   .err { font-size:13px; color:#991b1b; background:#fef2f2; border:1px solid #fecaca; border-radius:5px; padding:10px 13px; margin-bottom:12px; }
   .err button { margin-left:6px; text-decoration:underline; background:none; border:none; color:#991b1b; cursor:pointer; font-size:13px; }
 
-  .gridwrap { overflow-x:auto; }
-  .cal { min-width:720px; border-top:1px solid #d1d5db; border-left:1px solid #d1d5db; }
-  .weekdays { display:grid; grid-template-columns:repeat(7,1fr); background:#f9fafb; border-bottom:1px solid #d1d5db; }
-  .weekdays div { font-size:11px; font-weight:500; color:#6b7280; padding:4px 8px; border-right:1px solid #d1d5db; }
+  .cal { border-top:1px solid #d1d5db; border-left:1px solid #d1d5db; width:100%; }
+  .weekdays { display:grid; grid-template-columns:repeat(7,1fr); background:#f3f4f6; border-bottom:1px solid #9ca3af; position:sticky; top:0; z-index:20; }
+  .weekdays div { font-size:13px; font-weight:600; color:#374151; padding:6px 8px; border-right:1px solid #d1d5db; }
 
   .week { display:grid; grid-template-columns:repeat(7,1fr); position:relative; border-bottom:1px solid #e5e7eb; }
-  .daycell { border-right:1px solid #e5e7eb; padding:4px 4px 0; cursor:pointer; }
+  .daycell { border-right:1px solid #e5e7eb; padding:5px 5px 0; cursor:pointer; }
   .daycell:hover { background:#f9fafb; }
   .daycell.out { background:#fafafa; }
-  .daynum { font-size:11px; display:inline-flex; align-items:center; justify-content:center; width:19px; height:19px; border-radius:50%; color:#374151; }
+  .daynum { font-size:13px; font-weight:500; display:inline-flex; align-items:center; justify-content:center; width:23px; height:23px; border-radius:50%; color:#1f2937; }
   .daynum.out { color:#c1c5cb; }
-  .daynum.today { background:#111827; color:#fff; font-weight:600; }
+  .daynum.today { background:#111827; color:#fff; font-weight:700; }
 
-  .bars { position:absolute; left:0; right:0; top:24px; display:grid; grid-template-columns:repeat(7,1fr); pointer-events:none; }
-  .bar { overflow:hidden; white-space:nowrap; font-size:10px; line-height:15px; height:15px; padding:0 4px; margin:0 2px; cursor:pointer; pointer-events:auto; }
+  .today-frame { position:absolute; top:0; bottom:0; border:2px solid #111827; border-radius:4px; pointer-events:none; z-index:5; }
+
+  .bars { position:absolute; left:0; right:0; top:28px; display:grid; grid-template-columns:repeat(7,1fr); pointer-events:none; }
+  .bar { overflow:hidden; white-space:nowrap; font-size:10px; line-height:15px; height:15px; padding:0 4px; margin:0 2px; cursor:pointer; pointer-events:auto; display:flex; align-items:center; justify-content:center; text-align:center; }
 
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; z-index:50; }
   .modal { background:#fff; width:100%; max-width:380px; max-height:80vh; overflow-y:auto; border-radius:8px; box-shadow:0 10px 40px rgba(0,0,0,0.2); }
@@ -118,7 +119,7 @@
 
     <div class="legend" id="legend"></div>
     <div id="statusArea"></div>
-    <div class="gridwrap"><div class="cal" id="calArea"></div></div>
+    <div class="cal" id="calArea"></div>
   </div>
 
 </div>
@@ -134,7 +135,8 @@ const CATEGORY_STYLES = {
   Gref:  { bg: "#A6A6A6", text: "#1a1a1a", label: "Greffage" },
   Marc:  { bg: "#00897B", text: "#ffffff", label: "Marcottage" },
 };
-const CATEGORY_ORDER = ["SA","SE","Plant","Bout","Rec","Gref","Marc"];
+const CATEGORY_ORDER = ["SA","SE","Plant","Rec","Bout","Gref","Marc"];
+const BAND_ORDER = [...CATEGORY_ORDER, null];
 const DEFAULT_STYLE = { bg:"#64748b", text:"#ffffff", label:"Autre" };
 const WEEKDAYS = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 const MONTHS = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
@@ -191,6 +193,24 @@ function assignLanesForWeek(events, weekStart, weekEnd, laneHints) {
   const newHints = new Map();
   for (const ev of placed) if (ev.continuesRight) newHints.set(ev.id, ev.lane);
   return { placed, laneCount: laneEnds.length, newHints };
+}
+
+// empile les catégories dans un ordre fixe (bandes SA/SE/Plant/Rec/Bout/Gref/Marc/Autre),
+// chaque bande n'occupant que le nombre de voies dont elle a besoin cette semaine-là.
+function assignLanesGrouped(events, weekStart, weekEnd, hintsByCat) {
+  let yOffset = 0;
+  const allPlaced = [];
+  const newHintsByCat = new Map();
+  for (const cat of BAND_ORDER) {
+    const catEvents = events.filter(e => e.category === cat);
+    if (catEvents.length === 0) { newHintsByCat.set(cat, new Map()); continue; }
+    const hints = hintsByCat.get(cat) || new Map();
+    const { placed, laneCount, newHints } = assignLanesForWeek(catEvents, weekStart, weekEnd, hints);
+    placed.forEach(p => allPlaced.push({ ...p, lane: p.lane + yOffset }));
+    newHintsByCat.set(cat, newHints);
+    yOffset += laneCount;
+  }
+  return { placed: allPlaced, laneCount: yOffset, newHintsByCat };
 }
 
 // ---------- état ----------
@@ -306,13 +326,13 @@ async function renderCalendar() {
 
 function drawGrid(events) {
   const weeks = buildMonthGrid(monthDate);
-  let hints = new Map();
+  let hintsByCat = new Map();
   let html = '<div class="weekdays">' + WEEKDAYS.map(d => "<div>"+d+"</div>").join("") + "</div>";
 
   weeks.forEach(week => {
-    const { placed, laneCount, newHints } = assignLanesForWeek(events, week[0], week[6], hints);
-    hints = newHints;
-    const barH = 15, gap = 2, top = 24;
+    const { placed, laneCount, newHintsByCat } = assignLanesGrouped(events, week[0], week[6], hintsByCat);
+    hintsByCat = newHintsByCat;
+    const barH = 15, gap = 2, top = 28;
     const minH = top + Math.max(laneCount,1)*(barH+gap) + 8;
 
     let dayCells = week.map(day => {
@@ -329,7 +349,10 @@ function drawGrid(events) {
       return '<div class="bar" style="grid-column:'+(ev.startCol+1)+'/'+(ev.endCol+2)+';grid-row:1;margin-top:'+(ev.lane*(barH+gap))+'px;background:'+style.bg+';color:'+style.text+';border-radius:'+rl+'px '+rr+'px '+rr+'px '+rl+'px;" title="'+ev.name.replace(/"/g,"&quot;")+' ('+toISODate(ev.start)+' \u2192 '+toISODate(ev.end)+')" onclick="event.stopPropagation();openDay(\''+toISODate(jumpDay)+'\')">'+ev.name+"</div>";
     }).join("");
 
-    html += '<div class="week" style="min-height:'+minH+'px">' + dayCells
+    const todayIdx = week.findIndex(d => sameDay(d, today));
+    const todayFrame = todayIdx >= 0 ? '<div class="today-frame" style="grid-column:'+(todayIdx+1)+'/'+(todayIdx+2)+'"></div>' : "";
+
+    html += '<div class="week" style="min-height:'+minH+'px">' + dayCells + todayFrame
       + '<div class="bars" style="top:'+top+'px">' + bars + "</div></div>";
   });
   document.getElementById("calArea").innerHTML = html;
