@@ -54,7 +54,7 @@
   .today-frame { position:absolute; top:0; bottom:0; border:2px solid #111827; border-radius:4px; pointer-events:none; z-index:5; }
 
   .bars { position:absolute; left:0; right:0; top:28px; display:grid; grid-template-columns:repeat(7,1fr); pointer-events:none; }
-  .bar { overflow:hidden; white-space:nowrap; font-size:10px; line-height:15px; height:15px; padding:0 4px; margin:0 2px; cursor:pointer; pointer-events:auto; display:flex; align-items:center; justify-content:center; text-align:center; }
+  .bar { overflow:hidden; white-space:nowrap; font-size:10.5px; font-weight:500; line-height:18px; height:18px; padding:0 4px; margin:0 2px; cursor:pointer; pointer-events:auto; display:flex; align-items:center; justify-content:center; text-align:center; }
 
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; z-index:50; }
   .modal { background:#fff; width:100%; max-width:380px; max-height:80vh; overflow-y:auto; border-radius:8px; box-shadow:0 10px 40px rgba(0,0,0,0.2); }
@@ -167,50 +167,27 @@ function buildMonthGrid(monthDate) {
   return weeks;
 }
 
-function assignLanesForWeek(events, weekStart, weekEnd, laneHints) {
-  const overlapping = events.filter(e => e.end >= weekStart && e.start <= weekEnd).map(e => {
-    const localStart = e.start < weekStart ? weekStart : e.start;
-    const localEnd = e.end > weekEnd ? weekEnd : e.end;
-    return { ...e,
-      startCol: Math.round((localStart-weekStart)/86400000),
-      endCol: Math.round((localEnd-weekStart)/86400000),
-      continuesLeft: e.start < weekStart,
-      continuesRight: e.end > weekEnd };
-  });
-  overlapping.sort((a,b) => a.startCol-b.startCol || (b.endCol-b.startCol)-(a.endCol-a.startCol));
-  const laneEnds = [], placed = [], remaining = [];
-  for (const ev of overlapping) {
-    const hint = laneHints.get(ev.id);
-    if (hint !== undefined && (laneEnds[hint]===undefined || laneEnds[hint] < ev.startCol)) {
-      laneEnds[hint] = ev.endCol; placed.push({...ev, lane:hint});
-    } else remaining.push(ev);
+// fusionne les événements d'une même catégorie qui se chevauchent ou se touchent
+// en segments continus, pour n'occuper qu'une seule ligne par catégorie au lieu d'empiler.
+function mergeIntervals(events) {
+  if (!events.length) return [];
+  const sorted = [...events].sort((a,b) => a.start - b.start);
+  const merged = [];
+  for (const ev of sorted) {
+    const last = merged[merged.length-1];
+    if (last && ev.start <= addDays(last.end, 1)) {
+      if (ev.end > last.end) last.end = ev.end;
+      last.items.push(ev);
+    } else {
+      merged.push({ start: ev.start, end: ev.end, items: [ev] });
+    }
   }
-  for (const ev of remaining) {
-    let lane = laneEnds.findIndex(end => end < ev.startCol);
-    if (lane === -1) lane = laneEnds.length;
-    laneEnds[lane] = ev.endCol; placed.push({...ev, lane});
-  }
-  const newHints = new Map();
-  for (const ev of placed) if (ev.continuesRight) newHints.set(ev.id, ev.lane);
-  return { placed, laneCount: laneEnds.length, newHints };
+  return merged;
 }
-
-// empile les catégories dans un ordre fixe (bandes SA/SE/Plant/Rec/Bout/Gref/Marc/Autre),
-// chaque bande n'occupant que le nombre de voies dont elle a besoin cette semaine-là.
-function assignLanesGrouped(events, weekStart, weekEnd, hintsByCat) {
-  let yOffset = 0;
-  const allPlaced = [];
-  const newHintsByCat = new Map();
-  for (const cat of BAND_ORDER) {
-    const catEvents = events.filter(e => e.category === cat);
-    if (catEvents.length === 0) { newHintsByCat.set(cat, new Map()); continue; }
-    const hints = hintsByCat.get(cat) || new Map();
-    const { placed, laneCount, newHints } = assignLanesForWeek(catEvents, weekStart, weekEnd, hints);
-    placed.forEach(p => allPlaced.push({ ...p, lane: p.lane + yOffset }));
-    newHintsByCat.set(cat, newHints);
-    yOffset += laneCount;
-  }
-  return { placed: allPlaced, laneCount: yOffset, newHintsByCat };
+function buildMergedByCategory(events) {
+  const byCat = new Map();
+  for (const cat of BAND_ORDER) byCat.set(cat, mergeIntervals(events.filter(e => e.category === cat)));
+  return byCat;
 }
 
 // ---------- état ----------
@@ -326,13 +303,33 @@ async function renderCalendar() {
 
 function drawGrid(events) {
   const weeks = buildMonthGrid(monthDate);
-  let hintsByCat = new Map();
+  const mergedByCat = buildMergedByCategory(events);
+  const barH = 18, gap = 2, top = 28;
   let html = '<div class="weekdays">' + WEEKDAYS.map(d => "<div>"+d+"</div>").join("") + "</div>";
 
   weeks.forEach(week => {
-    const { placed, laneCount, newHintsByCat } = assignLanesGrouped(events, week[0], week[6], hintsByCat);
-    hintsByCat = newHintsByCat;
-    const barH = 15, gap = 2, top = 28;
+    const weekStart = week[0], weekEnd = week[6];
+    let lane = 0;
+    let bars = "";
+    BAND_ORDER.forEach(cat => {
+      const segments = mergedByCat.get(cat).filter(seg => seg.end >= weekStart && seg.start <= weekEnd);
+      if (!segments.length) return;
+      const style = CATEGORY_STYLES[cat] || DEFAULT_STYLE;
+      segments.forEach(seg => {
+        const localStart = seg.start < weekStart ? weekStart : seg.start;
+        const localEnd = seg.end > weekEnd ? weekEnd : seg.end;
+        const startCol = Math.round((localStart-weekStart)/86400000);
+        const endCol = Math.round((localEnd-weekStart)/86400000);
+        const continuesLeft = seg.start < weekStart, continuesRight = seg.end > weekEnd;
+        const rl = continuesLeft ? 0 : 3, rr = continuesRight ? 0 : 3;
+        const label = seg.items.length === 1 ? seg.items[0].name : "\u00d7" + seg.items.length;
+        const tooltip = seg.items.map(i => i.name).join("\n") + " (" + toISODate(seg.start) + " \u2192 " + toISODate(seg.end) + ")";
+        const jumpDay = (seg.start <= today && seg.end >= today) ? today : seg.start;
+        bars += '<div class="bar" style="grid-column:'+(startCol+1)+'/'+(endCol+2)+';grid-row:1;margin-top:'+(lane*(barH+gap))+'px;height:'+barH+'px;line-height:'+barH+'px;background:'+style.bg+';color:'+style.text+';border-radius:'+rl+'px '+rr+'px '+rr+'px '+rl+'px;" title="'+tooltip.replace(/"/g,"&quot;")+'" onclick="event.stopPropagation();openDay(\''+toISODate(jumpDay)+'\')">'+label+"</div>";
+      });
+      lane++;
+    });
+    const laneCount = lane;
     const minH = top + Math.max(laneCount,1)*(barH+gap) + 8;
 
     let dayCells = week.map(day => {
@@ -340,13 +337,6 @@ function drawGrid(events) {
       const isToday = sameDay(day, today);
       return '<div class="daycell'+(inMonth?"":" out")+'" onclick="openDay(\''+toISODate(day)+'\')">'
         + '<span class="daynum'+(isToday?" today":(inMonth?"":" out"))+'">'+day.getDate()+"</span></div>";
-    }).join("");
-
-    let bars = placed.map(ev => {
-      const style = CATEGORY_STYLES[ev.category] || DEFAULT_STYLE;
-      const rl = ev.continuesLeft ? 0 : 3, rr = ev.continuesRight ? 0 : 3;
-      const jumpDay = (ev.start <= today && ev.end >= today) ? today : ev.start;
-      return '<div class="bar" style="grid-column:'+(ev.startCol+1)+'/'+(ev.endCol+2)+';grid-row:1;margin-top:'+(ev.lane*(barH+gap))+'px;background:'+style.bg+';color:'+style.text+';border-radius:'+rl+'px '+rr+'px '+rr+'px '+rl+'px;" title="'+ev.name.replace(/"/g,"&quot;")+' ('+toISODate(ev.start)+' \u2192 '+toISODate(ev.end)+')" onclick="event.stopPropagation();openDay(\''+toISODate(jumpDay)+'\')">'+ev.name+"</div>";
     }).join("");
 
     const todayIdx = week.findIndex(d => sameDay(d, today));
