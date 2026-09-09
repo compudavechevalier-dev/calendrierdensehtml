@@ -43,8 +43,9 @@
   .weekdays { display:grid; grid-template-columns:repeat(7,1fr); background:#f3f4f6; border-bottom:1px solid #9ca3af; position:sticky; top:0; z-index:20; }
   .weekdays div { font-size:13px; font-weight:600; color:#374151; padding:6px 8px; border-right:1px solid #d1d5db; }
 
-  .week { display:grid; grid-template-columns:repeat(7,1fr); position:relative; border-bottom:1px solid #e5e7eb; }
-  .daycell { border-right:1px solid #e5e7eb; padding:5px 5px 0; cursor:pointer; }
+  .week { position:relative; border-bottom:1px solid #e5e7eb; padding-bottom:4px; }
+  .daynums-row { display:grid; grid-template-columns:repeat(7,1fr); }
+  .daycell { border-right:1px solid #e5e7eb; padding:5px 5px 2px; cursor:pointer; }
   .daycell:hover { background:#f9fafb; }
   .daycell.out { background:#fafafa; }
   .daynum { font-size:13px; font-weight:500; display:inline-flex; align-items:center; justify-content:center; width:23px; height:23px; border-radius:50%; color:#1f2937; }
@@ -53,8 +54,8 @@
 
   .today-frame { position:absolute; top:0; bottom:0; border:2px solid #111827; border-radius:4px; pointer-events:none; z-index:5; }
 
-  .bars { position:absolute; left:0; right:0; top:28px; display:grid; grid-template-columns:repeat(7,1fr); pointer-events:none; }
-  .bar { overflow:hidden; white-space:nowrap; font-size:10.5px; font-weight:500; line-height:18px; height:18px; padding:0 4px; margin:0 2px; cursor:pointer; pointer-events:auto; display:flex; align-items:center; justify-content:center; text-align:center; }
+  .cat-row { display:grid; grid-template-columns:repeat(7,1fr); margin-top:2px; }
+  .bar { word-break:break-word; white-space:normal; font-size:10.5px; font-weight:500; line-height:1.3; padding:2px 5px; margin:0 2px; cursor:pointer; display:flex; align-items:center; justify-content:center; text-align:center; border-radius:3px; min-height:16px; }
 
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; z-index:50; }
   .modal { background:#fff; width:100%; max-width:380px; max-height:80vh; overflow-y:auto; border-radius:8px; box-shadow:0 10px 40px rgba(0,0,0,0.2); }
@@ -304,33 +305,10 @@ async function renderCalendar() {
 function drawGrid(events) {
   const weeks = buildMonthGrid(monthDate);
   const mergedByCat = buildMergedByCategory(events);
-  const barH = 18, gap = 2, top = 28;
   let html = '<div class="weekdays">' + WEEKDAYS.map(d => "<div>"+d+"</div>").join("") + "</div>";
 
   weeks.forEach(week => {
     const weekStart = week[0], weekEnd = week[6];
-    let lane = 0;
-    let bars = "";
-    BAND_ORDER.forEach(cat => {
-      const segments = mergedByCat.get(cat).filter(seg => seg.end >= weekStart && seg.start <= weekEnd);
-      if (!segments.length) return;
-      const style = CATEGORY_STYLES[cat] || DEFAULT_STYLE;
-      segments.forEach(seg => {
-        const localStart = seg.start < weekStart ? weekStart : seg.start;
-        const localEnd = seg.end > weekEnd ? weekEnd : seg.end;
-        const startCol = Math.round((localStart-weekStart)/86400000);
-        const endCol = Math.round((localEnd-weekStart)/86400000);
-        const continuesLeft = seg.start < weekStart, continuesRight = seg.end > weekEnd;
-        const rl = continuesLeft ? 0 : 3, rr = continuesRight ? 0 : 3;
-        const label = seg.items.length === 1 ? seg.items[0].name : "\u00d7" + seg.items.length;
-        const tooltip = seg.items.map(i => i.name).join("\n") + " (" + toISODate(seg.start) + " \u2192 " + toISODate(seg.end) + ")";
-        const jumpDay = (seg.start <= today && seg.end >= today) ? today : seg.start;
-        bars += '<div class="bar" style="grid-column:'+(startCol+1)+'/'+(endCol+2)+';grid-row:1;margin-top:'+(lane*(barH+gap))+'px;height:'+barH+'px;line-height:'+barH+'px;background:'+style.bg+';color:'+style.text+';border-radius:'+rl+'px '+rr+'px '+rr+'px '+rl+'px;" title="'+tooltip.replace(/"/g,"&quot;")+'" onclick="event.stopPropagation();openDay(\''+toISODate(jumpDay)+'\')">'+label+"</div>";
-      });
-      lane++;
-    });
-    const laneCount = lane;
-    const minH = top + Math.max(laneCount,1)*(barH+gap) + 8;
 
     let dayCells = week.map(day => {
       const inMonth = day.getMonth() === monthDate.getMonth();
@@ -339,11 +317,32 @@ function drawGrid(events) {
         + '<span class="daynum'+(isToday?" today":(inMonth?"":" out"))+'">'+day.getDate()+"</span></div>";
     }).join("");
 
-    const todayIdx = week.findIndex(d => sameDay(d, today));
-    const todayFrame = todayIdx >= 0 ? '<div class="today-frame" style="grid-column:'+(todayIdx+1)+'/'+(todayIdx+2)+'"></div>' : "";
+    let catRows = "";
+    BAND_ORDER.forEach(cat => {
+      const segments = mergedByCat.get(cat).filter(seg => seg.end >= weekStart && seg.start <= weekEnd);
+      if (!segments.length) return;
+      const style = CATEGORY_STYLES[cat] || DEFAULT_STYLE;
+      const rowBars = segments.map(seg => {
+        const localStart = seg.start < weekStart ? weekStart : seg.start;
+        const localEnd = seg.end > weekEnd ? weekEnd : seg.end;
+        const startCol = Math.round((localStart-weekStart)/86400000);
+        const endCol = Math.round((localEnd-weekStart)/86400000);
+        const continuesLeft = seg.start < weekStart, continuesRight = seg.end > weekEnd;
+        const rl = continuesLeft ? 0 : 3, rr = continuesRight ? 0 : 3;
+        const label = seg.items.map(i => i.name).join(", ");
+        const tooltip = label + " (" + toISODate(seg.start) + " \u2192 " + toISODate(seg.end) + ")";
+        const jumpDay = (seg.start <= today && seg.end >= today) ? today : seg.start;
+        return '<div class="bar" style="grid-column:'+(startCol+1)+'/'+(endCol+2)+';background:'+style.bg+';color:'+style.text+';border-radius:'+rl+'px '+rr+'px '+rr+'px '+rl+'px;" title="'+tooltip.replace(/"/g,"&quot;")+'" onclick="event.stopPropagation();openDay(\''+toISODate(jumpDay)+'\')">'+label.replace(/</g,"&lt;")+"</div>";
+      }).join("");
+      catRows += '<div class="cat-row">' + rowBars + "</div>";
+    });
 
-    html += '<div class="week" style="min-height:'+minH+'px">' + dayCells + todayFrame
-      + '<div class="bars" style="top:'+top+'px">' + bars + "</div></div>";
+    const todayIdx = week.findIndex(d => sameDay(d, today));
+    const todayFrame = todayIdx >= 0
+      ? '<div class="today-frame" style="left:calc(100%/7*'+todayIdx+');width:calc(100%/7);"></div>'
+      : "";
+
+    html += '<div class="week">' + todayFrame + '<div class="daynums-row">' + dayCells + "</div>" + catRows + "</div>";
   });
   document.getElementById("calArea").innerHTML = html;
 }
