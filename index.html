@@ -9,7 +9,7 @@
   :root { --line:#d1d5db; }
   * { box-sizing: border-box; }
   body { margin:0; font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; color:#111827; background:#fff; }
-  .wrap { max-width: 1800px; margin: 0 auto; padding: 20px 26px 80px; }
+  .wrap { max-width: none; margin: 0; padding: 20px clamp(20px, 2.5vw, 56px) 80px; }
 
   .setup-box { border:1px solid #f59e0b; background:#fffbeb; border-radius:6px; padding:16px 18px; margin-bottom:18px; font-size:13.5px; line-height:1.6; }
   .setup-box h2 { margin:0 0 8px; font-size:15px; }
@@ -185,9 +185,33 @@ function mergeIntervals(events) {
   }
   return merged;
 }
+// empile des événements individuels (non fusionnés) sur le minimum de lignes nécessaire,
+// sans jamais modifier la date d'aucun d'entre eux.
+function packRows(events) {
+  const sorted = [...events].sort((a,b) => a.start - b.start);
+  const rowEnds = [], rows = [];
+  for (const ev of sorted) {
+    let r = rowEnds.findIndex(end => end < ev.start);
+    if (r === -1) { r = rowEnds.length; rows.push([]); }
+    rowEnds[r] = ev.end;
+    rows[r].push(ev);
+  }
+  return rows;
+}
+// pour chaque catégorie, retourne un tableau de lignes (chaque ligne = tableau de segments).
+// Les catégories nommées (SA, SE...) sont fusionnées et tiennent donc sur une seule ligne.
+// Les événements non catégorisés (anniversaires, etc.) ne sont jamais fusionnés entre eux,
+// seulement répartis sur autant de lignes que nécessaire pour ne jamais se chevaucher.
 function buildMergedByCategory(events) {
   const byCat = new Map();
-  for (const cat of BAND_ORDER) byCat.set(cat, mergeIntervals(events.filter(e => e.category === cat)));
+  for (const cat of BAND_ORDER) {
+    const catEvents = events.filter(e => e.category === cat);
+    if (cat === null) {
+      byCat.set(cat, packRows(catEvents).map(row => row.map(e => ({ start: e.start, end: e.end, items: [e] }))));
+    } else {
+      byCat.set(cat, [mergeIntervals(catEvents)]);
+    }
+  }
   return byCat;
 }
 
@@ -211,7 +235,27 @@ function saveClientId() {
 }
 function resetClientId() {
   localStorage.removeItem("cd_client_id");
+  localStorage.removeItem("cd_token");
   location.reload();
+}
+
+function saveToken(resp) {
+  accessToken = resp.access_token;
+  const ttlMs = (resp.expires_in ? Number(resp.expires_in) : 3500) * 1000;
+  localStorage.setItem("cd_token", JSON.stringify({ token: accessToken, expiresAt: Date.now() + ttlMs }));
+}
+function loadCachedToken() {
+  try {
+    const cached = JSON.parse(localStorage.getItem("cd_token") || "null");
+    if (cached && cached.expiresAt > Date.now() + 120000) return cached.token;
+  } catch (e) {}
+  return null;
+}
+function showApp() {
+  document.getElementById("connectBox").style.display = "none";
+  document.getElementById("appBox").style.display = "block";
+  renderLegend();
+  renderCalendar();
 }
 
 function initGoogle() {
@@ -220,19 +264,28 @@ function initGoogle() {
     client_id: CLIENT_ID,
     scope: SCOPE,
     callback: (resp) => {
-      if (resp.error) { alert("Connexion refusée: " + resp.error); return; }
-      accessToken = resp.access_token;
-      document.getElementById("connectBox").style.display = "none";
-      document.getElementById("appBox").style.display = "block";
-      renderLegend();
-      renderCalendar();
+      if (resp.error) { document.getElementById("connectBox").style.display = "block"; return; }
+      saveToken(resp);
+      showApp();
     },
   });
+
+  const cachedToken = loadCachedToken();
+  if (cachedToken) {
+    accessToken = cachedToken;
+    showApp();
+    return;
+  }
+  // pas de jeton valide en cache: tente une reconnexion silencieuse (sans fenêtre),
+  // qui réussit si une session Google est déjà active dans le navigateur. Le bouton
+  // manuel reste affiché en secours si la tentative silencieuse échoue ou traîne.
   document.getElementById("connectBox").style.display = "block";
+  tokenClient.requestAccessToken({ prompt: "" });
 }
 function signIn() { tokenClient.requestAccessToken(); }
 function signOut() {
   accessToken = null;
+  localStorage.removeItem("cd_token");
   Object.keys(eventCache).forEach(k => delete eventCache[k]);
   document.getElementById("appBox").style.display = "none";
   document.getElementById("connectBox").style.display = "block";
@@ -258,7 +311,7 @@ async function fetchEvents(rangeStart, rangeEnd) {
   url.searchParams.set("maxResults", "2500");
   url.searchParams.set("orderBy", "startTime");
   const resp = await fetch(url, { headers: { Authorization: "Bearer " + accessToken } });
-  if (resp.status === 401) { accessToken = null; throw new Error("Session Google expirée, reconnecte-toi."); }
+  if (resp.status === 401) { accessToken = null; localStorage.removeItem("cd_token"); throw new Error("Session Google expirée, reconnecte-toi."); }
   if (!resp.ok) throw new Error("Erreur API Google (" + resp.status + ")");
   const data = await resp.json();
   return (data.items || []).filter(it => it.status !== "cancelled").map((it, i) => {
@@ -319,22 +372,24 @@ function drawGrid(events) {
 
     let catRows = "";
     BAND_ORDER.forEach(cat => {
-      const segments = mergedByCat.get(cat).filter(seg => seg.end >= weekStart && seg.start <= weekEnd);
-      if (!segments.length) return;
       const style = CATEGORY_STYLES[cat] || DEFAULT_STYLE;
-      const rowBars = segments.map(seg => {
-        const localStart = seg.start < weekStart ? weekStart : seg.start;
-        const localEnd = seg.end > weekEnd ? weekEnd : seg.end;
-        const startCol = Math.round((localStart-weekStart)/86400000);
-        const endCol = Math.round((localEnd-weekStart)/86400000);
-        const continuesLeft = seg.start < weekStart, continuesRight = seg.end > weekEnd;
-        const rl = continuesLeft ? 0 : 3, rr = continuesRight ? 0 : 3;
-        const label = seg.items.map(i => i.name).join(", ");
-        const tooltip = label + " (" + toISODate(seg.start) + " \u2192 " + toISODate(seg.end) + ")";
-        const jumpDay = (seg.start <= today && seg.end >= today) ? today : seg.start;
-        return '<div class="bar" style="grid-column:'+(startCol+1)+'/'+(endCol+2)+';background:'+style.bg+';color:'+style.text+';border-radius:'+rl+'px '+rr+'px '+rr+'px '+rl+'px;" title="'+tooltip.replace(/"/g,"&quot;")+'" onclick="event.stopPropagation();openDay(\''+toISODate(jumpDay)+'\')">'+label.replace(/</g,"&lt;")+"</div>";
-      }).join("");
-      catRows += '<div class="cat-row">' + rowBars + "</div>";
+      mergedByCat.get(cat).forEach(rowSegments => {
+        const segments = rowSegments.filter(seg => seg.end >= weekStart && seg.start <= weekEnd);
+        if (!segments.length) return;
+        const rowBars = segments.map(seg => {
+          const localStart = seg.start < weekStart ? weekStart : seg.start;
+          const localEnd = seg.end > weekEnd ? weekEnd : seg.end;
+          const startCol = Math.round((localStart-weekStart)/86400000);
+          const endCol = Math.round((localEnd-weekStart)/86400000);
+          const continuesLeft = seg.start < weekStart, continuesRight = seg.end > weekEnd;
+          const rl = continuesLeft ? 0 : 3, rr = continuesRight ? 0 : 3;
+          const label = seg.items.map(i => i.name).join(", ");
+          const tooltip = label + " (" + toISODate(seg.start) + " \u2192 " + toISODate(seg.end) + ")";
+          const jumpDay = (seg.start <= today && seg.end >= today) ? today : seg.start;
+          return '<div class="bar" style="grid-column:'+(startCol+1)+'/'+(endCol+2)+';background:'+style.bg+';color:'+style.text+';border-radius:'+rl+'px '+rr+'px '+rr+'px '+rl+'px;" title="'+tooltip.replace(/"/g,"&quot;")+'" onclick="event.stopPropagation();openDay(\''+toISODate(jumpDay)+'\')">'+label.replace(/</g,"&lt;")+"</div>";
+        }).join("");
+        catRows += '<div class="cat-row">' + rowBars + "</div>";
+      });
     });
 
     const todayIdx = week.findIndex(d => sameDay(d, today));
