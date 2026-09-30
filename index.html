@@ -181,7 +181,7 @@ function mergeIntervals(events) {
   const merged = [];
   for (const ev of sorted) {
     const last = merged[merged.length-1];
-    if (last && ev.start <= addDays(last.end, 1)) {
+    if (last && ev.start <= last.end) {
       if (ev.end > last.end) last.end = ev.end;
       last.items.push(ev);
     } else {
