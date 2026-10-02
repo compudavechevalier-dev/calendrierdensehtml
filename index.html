@@ -177,17 +177,27 @@ function buildMonthGrid(monthDate) {
 // en segments continus, pour n'occuper qu'une seule ligne par catégorie au lieu d'empiler.
 function mergeIntervals(events) {
   if (!events.length) return [];
+  const TOL_DAYS = 3;
   const sorted = [...events].sort((a,b) => a.start - b.start);
-  const merged = [];
+  const groups = [];
   for (const ev of sorted) {
-    const last = merged[merged.length-1];
-    if (last && ev.start <= last.end) {
-      if (ev.end > last.end) last.end = ev.end;
-      last.items.push(ev);
-    } else {
-      merged.push({ start: ev.start, end: ev.end, items: [ev] });
+    let placed = false;
+    for (const g of groups) {
+      const startDiff = Math.abs((ev.start - g.anchorStart) / 86400000);
+      const endDiff = Math.abs((ev.end - g.anchorEnd) / 86400000);
+      if (startDiff <= TOL_DAYS && endDiff <= TOL_DAYS) {
+        g.items.push(ev);
+        if (ev.start < g.unionStart) g.unionStart = ev.start;
+        if (ev.end > g.unionEnd) g.unionEnd = ev.end;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      groups.push({ anchorStart: ev.start, anchorEnd: ev.end, unionStart: ev.start, unionEnd: ev.end, items: [ev] });
     }
   }
+  const merged = groups.map(g => ({ start: g.unionStart, end: g.unionEnd, items: g.items }));
   return merged;
 }
 // empile des événements individuels (non fusionnés) sur le minimum de lignes nécessaire,
