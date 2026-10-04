@@ -129,7 +129,6 @@
 
 </div>
 <div id="modalRoot"></div>
-<div id="dbgPanel" style="position:fixed;bottom:8px;right:8px;background:#111827;color:#d1fae5;font:10.5px monospace;padding:8px 10px;border-radius:5px;z-index:999;opacity:0.85;max-width:280px;line-height:1.5;"></div>
 
 <script>
 const CATEGORY_STYLES = {
@@ -345,23 +344,6 @@ document.addEventListener("click", () => {
   if (!c || c.expiresAt - Date.now() < 10 * 60000) tryRenew();
 }, true);
 setInterval(updateSessionInfo, 30000);
-
-function dbg() {
-  const el = document.getElementById("dbgPanel");
-  if (!el) return;
-  function h(sel) { const n = document.querySelector(sel); return n ? Math.round(n.getBoundingClientRect().height) : "abs"; }
-  function cs(sel, prop) { const n = document.querySelector(sel); return n ? getComputedStyle(n)[prop] : "abs"; }
-  const weeks = document.querySelectorAll(".week");
-  let sumWeeks = 0; weeks.forEach(w => sumWeeks += w.getBoundingClientRect().height);
-  el.innerHTML = APP_VERSION
-    + "<br>fenetre: " + window.innerHeight
-    + "<br>wrap: " + h(".wrap") + " (mh:" + cs(".wrap","minHeight") + ")"
-    + "<br>appBox: " + h("#appBox") + " (disp:" + cs("#appBox","display") + " fx:" + cs("#appBox","flexGrow") + ")"
-    + "<br>cal: " + h(".cal") + " (fx:" + cs(".cal","flexGrow") + "/" + cs(".cal","flexShrink") + "/" + cs(".cal","flexBasis") + ")"
-    + "<br>weeks(" + weeks.length + "): somme=" + Math.round(sumWeeks);
-}
-setInterval(dbg, 1000);
-window.addEventListener("resize", dbg);
 
 function signOut() {
   accessToken = null;
